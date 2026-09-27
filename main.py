@@ -106,8 +106,8 @@ Anda adalah Analis Kripto Senior. Terapkan **Sistem Filter 3 Lapis & Elevator Co
 - **Abaikan Mid-Cap** (Death Zone).
 
 **PARAMATER TAMBAHAN (SOP METRICS):**
-- Volume/MCap Ratio $\approx 5\%$ atau lebih.
-- Circulating Supply $>70\%$ (Aman dari risiko token dump).
+- Volume/MCap Ratio ≈ 5% atau lebih.
+- Circulating Supply >70% (Aman dari risiko token dump).
 
 **LAPIS 3: STRATEGI EKSEKUSI & EXIT PLAN**
 - Sertakan panduan harga entry/support teknikal serta strategi **DCA Sell (Take Profit Bertahap)** untuk diputar kembali (*flip*) ke Bitcoin.
@@ -125,7 +125,7 @@ Tuliskan analisis dalam format Markdown yang rapi, padat, profesional, dan mudah
         for percobaan in range(3):
             try:
                 res = client.models.generate_content(
-                    model='gemini-3.8-flash',
+                    model='gemini-2.5-flash',  # Menggunakan model stabil untuk menghindari error 503
                     contents=prompt,
                 )
                 break
@@ -149,4 +149,3 @@ Tuliskan analisis dalam format Markdown yang rapi, padat, profesional, dan mudah
 
 if __name__ == "__main__":
     jalankan_screening()
-
