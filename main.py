@@ -6,63 +6,106 @@ from google import genai
 def kirim_ke_discord(pesan):
     webhook_url = os.environ.get("DISCORD_WEBHOOK_URL")
     if not webhook_url:
-        print("❌ DISCORD_WEBHOOK_URL tidak ditemukan di Secrets!")
-        return
+        print("❌ ERROR: DISCORD_WEBHOOK_URL tidak ditemukan di Secrets GitHub!")
+        raise Exception("DISCORD_WEBHOOK_URL tidak ditemukan di Secrets GitHub!")
 
-    # Discord memiliki batasan maksimal 2000 karakter per pesan
-    if len(pesan) > 2000:
-        for i in range(0, len(pesan), 1900):
-            requests.post(webhook_url, json={"content": pesan[i:i+1900]})
-    else:
-        requests.post(webhook_url, json={"content": pesan})
+    # Memecah pesan jika melebihi batasan 2000 karakter Discord
+    chunks = [pesan[i:i+1900] for i in range(0, len(pesan), 1900)] if len(pesan) > 2000 else [pesan]
+    
+    for idx, chunk in enumerate(chunks):
+        response = requests.post(webhook_url, json={"content": chunk})
+        if response.status_code not in [200, 204]:
+            print(f"❌ Gagal Kirim ke Discord ({response.status_code}): {response.text}")
+            response.raise_for_status()
+
+def ambil_data_defillama_revenue():
+    """Mengambil Protocol Revenue & Fees harian dari DefiLlama (SOP Langkah 3)"""
+    try:
+        url = "https://api.llama.fi/overview/fees?dataType=dailyRevenue"
+        res = requests.get(url, timeout=15)
+        if res.status_code == 200:
+            protocols = res.json().get("protocols", [])
+            # Sort berdasarkan daily revenue tertinggi
+            protocols = sorted(protocols, key=lambda x: x.get("dailyRevenue", 0) or 0, reverse=True)
+            
+            data_formatted = []
+            for item in protocols[:8]:
+                name = item.get("name", "Unknown")
+                symbol = item.get("symbol", "N/A")
+                daily_rev = item.get("dailyRevenue", 0) or 0
+                daily_fees = item.get("dailyFees", 0) or 0
+                data_formatted.append(f"- **{name} ({symbol})**: Daily Revenue ~${daily_rev:,.0f} | Daily Fees ~${daily_fees:,.0f}")
+            return "\n".join(data_formatted)
+    except Exception as e:
+        print(f"⚠️ Gagal ambil data DefiLlama Revenue: {e}")
+    return "Data Revenue DefiLlama tidak tersedia."
+
+def ambil_data_coingecko_metrics():
+    """Mengambil Volume/MCap Ratio & Circulating Supply dari CoinGecko (SOP Langkah 1 & 2)"""
+    try:
+        url = "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=15&page=1&sparkline=false"
+        res = requests.get(url, timeout=15)
+        if res.status_code == 200:
+            coins = res.json()
+            data_formatted = []
+            for c in coins:
+                name = c.get("name")
+                symbol = c.get("symbol", "").upper()
+                mcap = c.get("market_cap", 0) or 0
+                vol = c.get("total_volume", 0) or 0
+                total_supply = c.get("total_supply") or c.get("max_supply") or 0
+                circ_supply = c.get("circulating_supply", 0) or 0
+                
+                # SOP 1: Vol/MCap ratio
+                vol_mcap_ratio = (vol / mcap * 100) if mcap > 0 else 0
+                
+                # SOP 2: Supply unlock %
+                supply_pct = (circ_supply / total_supply * 100) if total_supply > 0 else 100
+                
+                data_formatted.append(
+                    f"- **{name} ({symbol})**: Vol/MCap Ratio = **{vol_mcap_ratio:.2f}%** | Circulating Supply = **{supply_pct:.1f}%**"
+                )
+            return "\n".join(data_formatted)
+    except Exception as e:
+        print(f"⚠️ Gagal ambil data CoinGecko: {e}")
+    return "Data CoinGecko tidak tersedia."
 
 def jalankan_screening():
     try:
-        # 1. Ambil data dari API DefiLlama
-        res_llama = requests.get("https://api.llama.fi/protocols", timeout=15)
-        protocols = res_llama.json()[:10] if res_llama.status_code == 200 else []
+        print("🔍 Mengambil data dari DefiLlama & CoinGecko...")
+        revenue_data = ambil_data_defillama_revenue()
+        metrics_data = ambil_data_coingecko_metrics()
 
-        high_cap_list = []
-        low_cap_list = []
-
-        for item in protocols:
-            tvl = item.get("tvl", 0)
-            name = item.get("name", "Unknown")
-            symbol = item.get("symbol", "N/A")
-            if tvl > 500000000:
-                high_cap_list.append(f"- **{name} ({symbol})**: TVL ${tvl:,.0f}")
-            else:
-                low_cap_list.append(f"- **{name} ({symbol})**: TVL ${tvl:,.0f}")
-
-        text_high = "\n".join(high_cap_list) if high_cap_list else "Data tidak tersedia"
-        text_low = "\n".join(low_cap_list) if low_cap_list else "Data tidak tersedia"
-
-        # 2. Definisikan Prompt
+        # Build Prompt berdasarkan 5 SOP Video Xander Crypto
         prompt = f"""
-Anda adalah Analis Kripto Senior. Berikut data pasar terbaru dari DefiLlama:
+Anda adalah Analis Kripto Senior. Terapkan **SOP 5-Langkah Screening Altcoin (Xander Crypto Strategy)** pada data pasar berikut:
 
-📌 **5 KOIN/PROTOKOL MARKET CAP TINGGI (LARGE CAP):**
-{text_high}
+📊 **1. DATA DEFILLAMA (Protocol/Chain Daily Revenue & Real Yield):**
+{revenue_data}
 
-📌 **5 KOIN/PROTOKOL MARKET CAP RENDAH (LOW CAP / POTENSIAL):**
-{text_low}
+📈 **2. DATA COINGECKO (Volume/MCap Ratio & Supply Unlock Status):**
+{metrics_data}
 
-Tugas Anda:
-1. **Analisis Koin Market Cap Tinggi:** Pilih mana yang paling solid & alasannya.
-2. **Analisis Koin Market Cap Rendah:** Pilih mana yang memiliki potensi risk/reward paling menarik.
-3. **Kesimpulan & Rekomendasi:** Berikan insight singkat dan keputusan entri.
+---
 
-Gunakan format teks Markdown yang rapi dengan bullet points dan emoji yang sesuai. Buat ringkas dan padat.
+🎯 **INSTRUKSI SCREENING BERDASARKAN 5 SOP:**
+1. **Volume/MCap Ratio Check:** Filter altcoin dengan rasio Volume/Market Cap mendekati atau di atas 5% (Likuiditas & Peminat Aktif).
+2. **Circulating Supply Check:** Filter altcoin dengan circulating supply tinggi (>70%) untuk menghindari risiko dump / token unlock berlebih.
+3. **Revenue & Utility Check:** Tentukan mana proyek/chain yang menghasilkan Real Revenue & Fees harian secara konsisten di DefiLlama (bukan koin mati/zombie chain).
+4. **News & Fundamental Adoption Check:** Berikan 1-2 poin fundamental proyek yang berpotensi menjadi "Winner" di cycle mendatang.
+5. **Chart Altcoin vs BTC (Pair ALT/BTC):** Sertakan instruksi teknikal singkat untuk mengecek pair ALT/BTC di TradingView (apakah bertahan di atas EMA 13/21 & Support).
+
+Tuliskan analisis dalam format Markdown yang rapi, padat, profesional, dan mudah dibaca di Discord.
 """
 
-        # 3. Inisialisasi Gemini Client
+        # Inisialisasi Gemini Client
         api_key = os.environ.get("GEMINI_API_KEY")
         if not api_key:
             raise Exception("GEMINI_API_KEY tidak ditemukan di Secrets GitHub!")
 
         client = genai.Client(api_key=api_key)
 
-        # 4. Panggil Gemini API (menggunakan gemini-3.8-flash dan Retry Loop)
+        # Retry Loop dengan Model gemini-3.8-flash
         res = None
         for percobaan in range(3):
             try:
@@ -78,17 +121,16 @@ Gunakan format teks Markdown yang rapi dengan bullet points dan emoji yang sesua
                 else:
                     raise e
 
-        # 5. Kirim Hasil Akhir ke Discord
-        pesan_akhir = f"📊 **[SCREENING KRIPTO OTOMATIS]**\n\n{res.text}"
+        if not res or not res.text:
+            raise Exception("Respon dari Gemini kosong!")
+
+        pesan_akhir = f"📊 **[ALTCOIN SCREENING - SOP XANDER CRYPTO]**\n\n{res.text}"
         kirim_ke_discord(pesan_akhir)
         print("✅ Berhasil dikirim ke Discord!")
 
     except Exception as err:
-        pesan_error = f"⚠️ **Terjadi error pada sistem screening:** {err}"
-        kirim_ke_discord(pesan_error)
         print(f"❌ Error: {err}")
         raise err
 
 if __name__ == "__main__":
     jalankan_screening()
-
