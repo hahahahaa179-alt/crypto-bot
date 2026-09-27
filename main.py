@@ -9,7 +9,6 @@ def kirim_ke_discord(pesan):
         print("❌ ERROR: DISCORD_WEBHOOK_URL tidak ditemukan di Secrets GitHub!")
         raise Exception("DISCORD_WEBHOOK_URL tidak ditemukan di Secrets GitHub!")
 
-    # Memecah pesan jika melebihi batasan 2000 karakter Discord
     chunks = [pesan[i:i+1900] for i in range(0, len(pesan), 1900)] if len(pesan) > 2000 else [pesan]
     
     for idx, chunk in enumerate(chunks):
@@ -63,10 +62,7 @@ def ambil_data_coingecko_metrics():
             total_supply = c.get("total_supply") or c.get("max_supply") or 0
             circ_supply = c.get("circulating_supply", 0) or 0
             
-            # SOP 1: Vol/MCap ratio (~5%)
             vol_mcap_ratio = (vol / mcap * 100) if mcap > 0 else 0
-            
-            # SOP 2: Supply unlock % (>70%)
             supply_pct = (circ_supply / total_supply * 100) if total_supply > 0 else 100
             
             data_formatted.append(
@@ -83,7 +79,6 @@ def jalankan_screening():
         revenue_data = ambil_data_defillama_revenue()
         metrics_data = ambil_data_coingecko_metrics()
 
-        # Build Prompt berdasarkan 5 SOP Utama
         prompt = f"""
 Anda adalah Analis Kripto Senior. Terapkan **SOP 5-Langkah Screening Altcoin** pada data pasar berikut:
 
@@ -115,14 +110,14 @@ Tuliskan analisis dalam format Markdown yang rapi, padat, profesional, dan mudah
         for percobaan in range(3):
             try:
                 res = client.models.generate_content(
-                    model='gemini-3.8-flash',
+                    model='gemini-3.5-flash',
                     contents=prompt,
                 )
                 break
             except Exception as e:
-                print(f"⚠️ Server sibuk (Percobaan {percobaan + 1}/3). Menunggu 10 detik...")
+                print(f"⚠️ Server sibuk (Percobaan {percobaan + 1}/3). Menunggu 15 detik...")
                 if percobaan < 2:
-                    time.sleep(10)
+                    time.sleep(15)
                 else:
                     raise e
 
