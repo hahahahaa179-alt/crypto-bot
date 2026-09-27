@@ -65,10 +65,20 @@ Tugas Anda:
 Gunakan format teks Markdown yang rapi dengan emoji agar enak dibaca di Discord.
 """
 
-    res = client.models.generate_content(
-        model='gemini-3.8-flash',
-        contents=prompt,
-    )
+    # Coba hingga 3 kali jika server Google sibuk (error 503)
+for percobaan in range(3):
+    try:
+        res = client.models.generate_content(
+            model='gemini-3.8-flash',
+            contents=prompt,
+        )
+        break
+    except Exception as e:
+        if percobaan < 2:
+            time.sleep(10)  # Tunggu 10 detik sebelum coba lagi
+        else:
+            raise e
+
 
     pesan_akhir = f"📊 **[SCREENING KRIPTO OTOMATIS - UPDATE BERKALA]** 📊\n\n{res.text}"
     kirim_ke_discord(pesan_akhir)
