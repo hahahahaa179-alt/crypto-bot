@@ -1,4 +1,3 @@
-
 import os
 import time
 import requests
@@ -38,7 +37,7 @@ def jalankan_screening():
         text_high = "\n".join(high_cap_list) if high_cap_list else "Data tidak tersedia"
         text_low = "\n".join(low_cap_list) if low_cap_list else "Data tidak tersedia"
 
-        # 2. Definisikan Prompt Sebelum Dipanggil Gemini
+        # 2. Definisikan Prompt
         prompt = f"""
 Anda adalah Analis Kripto Senior. Berikut data pasar terbaru dari DefiLlama:
 
@@ -63,12 +62,12 @@ Gunakan format teks Markdown yang rapi dengan bullet points dan emoji yang sesua
 
         client = genai.Client(api_key=api_key)
 
-        # 4. Panggil Gemini API dengan Retry Loop (Atasi Error 503 Server Busy)
+        # 4. Panggil Gemini API (menggunakan gemini-3.8-flash dan Retry Loop)
         res = None
         for percobaan in range(3):
             try:
                 res = client.models.generate_content(
-                    model='gemini-2.5-flash',
+                    model='gemini-3.8-flash',
                     contents=prompt,
                 )
                 break
@@ -92,3 +91,4 @@ Gunakan format teks Markdown yang rapi dengan bullet points dan emoji yang sesua
 
 if __name__ == "__main__":
     jalankan_screening()
+
