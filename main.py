@@ -1,88 +1,94 @@
+
 import os
+import time
 import requests
 from google import genai
 
-DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-
-client = genai.Client(api_key=GEMINI_API_KEY)
-
 def kirim_ke_discord(pesan):
+    webhook_url = os.environ.get("DISCORD_WEBHOOK_URL")
+    if not webhook_url:
+        print("❌ DISCORD_WEBHOOK_URL tidak ditemukan di Secrets!")
+        return
+
+    # Discord memiliki batasan maksimal 2000 karakter per pesan
     if len(pesan) > 2000:
         for i in range(0, len(pesan), 1900):
-            payload = {"content": pesan[i:i+1900]}
-            requests.post(DISCORD_WEBHOOK_URL, json=payload)
+            requests.post(webhook_url, json={"content": pesan[i:i+1900]})
     else:
-        payload = {"content": pesan}
-        requests.post(DISCORD_WEBHOOK_URL, json=payload)
+        requests.post(webhook_url, json={"content": pesan})
 
 def jalankan_screening():
-    print("🔍 Mengambil data dari DefiLlama...")
-    url = "https://api.llama.fi/overview/fees?excludeTotalDataChart=true"
-    response = requests.get(url).json()
-    protocols = response.get("protocols", [])
+    try:
+        # 1. Ambil data dari API DefiLlama
+        res_llama = requests.get("https://api.llama.fi/protocols", timeout=15)
+        protocols = res_llama.json()[:10] if res_llama.status_code == 200 else []
 
-    candidates = []
-    for p in protocols:
-        name = p.get("name", "Unknown")
-        symbol = str(p.get("symbol", "-"))
-        rev_30d = p.get("revenue30d") or p.get("totalRevenue30d") or 0
-        mcap = p.get("mcap") or 0
+        high_cap_list = []
+        low_cap_list = []
 
-        if rev_30d > 0 and mcap > 0 and symbol not in ["-", "None", ""]:
-            annual_rev = rev_30d * 12
-            candidates.append({
-                "name": name,
-                "symbol": symbol,
-                "mcap_raw": mcap,
-                "mcap_m": round(mcap / 1_000_000, 2),
-                "rev_m": round(annual_rev / 1_000_000, 2)
-            })
+        for item in protocols:
+            tvl = item.get("tvl", 0)
+            name = item.get("name", "Unknown")
+            symbol = item.get("symbol", "N/A")
+            if tvl > 500000000:
+                high_cap_list.append(f"- **{name} ({symbol})**: TVL ${tvl:,.0f}")
+            else:
+                low_cap_list.append(f"- **{name} ({symbol})**: TVL ${tvl:,.0f}")
 
-    top_rev = sorted(candidates, key=lambda x: x["rev_m"], reverse=True)[:30]
-    sorted_by_mcap = sorted(top_rev, key=lambda x: x["mcap_raw"], reverse=True)
-    
-    high_mcap_5 = sorted_by_mcap[:5]
-    low_mcap_5 = sorted_by_mcap[-5:]
+        text_high = "\n".join(high_cap_list) if high_cap_list else "Data tidak tersedia"
+        text_low = "\n".join(low_cap_list) if low_cap_list else "Data tidak tersedia"
 
-    text_high = "\n".join([f"- **{g['name']} ({g['symbol']})**: Mcap = ${g['mcap_m']}M | Revenue = ${g['rev_m']}M/thn" for g in high_mcap_5])
-    text_low = "\n".join([f"- **{g['name']} ({g['symbol']})**: Mcap = ${g['mcap_m']}M | Revenue = ${g['rev_m']}M/thn" for g in low_mcap_5])
+        # 2. Definisikan Prompt Sebelum Dipanggil Gemini
+        prompt = f"""
+Anda adalah Analis Kripto Senior. Berikut data pasar terbaru dari DefiLlama:
 
-    prompt = f"""
-Anda adalah Analis Kripto Senior. Berikut data real-time protokol crypto berevenue tinggi dari DefiLlama:
-
-📌 **5 KOIN MARKET CAP TINGGI (LARGE CAP / BLUECHIP):**
+📌 **5 KOIN/PROTOKOL MARKET CAP TINGGI (LARGE CAP):**
 {text_high}
 
-📌 **5 KOIN MARKET CAP RENDAH (LOW CAP / POTENSI GEM):**
+📌 **5 KOIN/PROTOKOL MARKET CAP RENDAH (LOW CAP / POTENSIAL):**
 {text_low}
 
 Tugas Anda:
-1. **Analisis Koin Market Cap Tinggi:** Pilih koin terbaik berdasarkan rasio pendapatan vs market cap.
-2. **Analisis Koin Market Cap Rendah:** Pilih koin yang paling potensial / undervalued.
-3. **Kesimpulan & Rekomendasi:** Berikan insight singkat dan jelas untuk trader/investor.
+1. **Analisis Koin Market Cap Tinggi:** Pilih mana yang paling solid & alasannya.
+2. **Analisis Koin Market Cap Rendah:** Pilih mana yang memiliki potensi risk/reward paling menarik.
+3. **Kesimpulan & Rekomendasi:** Berikan insight singkat dan keputusan entri.
 
-Gunakan format teks Markdown yang rapi dengan emoji agar enak dibaca di Discord.
+Gunakan format teks Markdown yang rapi dengan bullet points dan emoji yang sesuai. Buat ringkas dan padat.
 """
 
-    # Coba hingga 3 kali jika server Google sibuk (error 503)
-for percobaan in range(3):
-    try:
-        res = client.models.generate_content(
-            model='gemini-3.8-flash',
-            contents=prompt,
-        )
-        break
-    except Exception as e:
-        if percobaan < 2:
-            time.sleep(10)  # Tunggu 10 detik sebelum coba lagi
-        else:
-            raise e
+        # 3. Inisialisasi Gemini Client
+        api_key = os.environ.get("GEMINI_API_KEY")
+        if not api_key:
+            raise Exception("GEMINI_API_KEY tidak ditemukan di Secrets GitHub!")
 
+        client = genai.Client(api_key=api_key)
 
-    pesan_akhir = f"📊 **[SCREENING KRIPTO OTOMATIS - UPDATE BERKALA]** 📊\n\n{res.text}"
-    kirim_ke_discord(pesan_akhir)
-    print("✅ Berhasil dikirim ke Discord!")
+        # 4. Panggil Gemini API dengan Retry Loop (Atasi Error 503 Server Busy)
+        res = None
+        for percobaan in range(3):
+            try:
+                res = client.models.generate_content(
+                    model='gemini-2.5-flash',
+                    contents=prompt,
+                )
+                break
+            except Exception as e:
+                print(f"⚠️ Server sibuk (Percobaan {percobaan + 1}/3). Menunggu 10 detik...")
+                if percobaan < 2:
+                    time.sleep(10)
+                else:
+                    raise e
+
+        # 5. Kirim Hasil Akhir ke Discord
+        pesan_akhir = f"📊 **[SCREENING KRIPTO OTOMATIS]**\n\n{res.text}"
+        kirim_ke_discord(pesan_akhir)
+        print("✅ Berhasil dikirim ke Discord!")
+
+    except Exception as err:
+        pesan_error = f"⚠️ **Terjadi error pada sistem screening:** {err}"
+        kirim_ke_discord(pesan_error)
+        print(f"❌ Error: {err}")
+        raise err
 
 if __name__ == "__main__":
     jalankan_screening()
