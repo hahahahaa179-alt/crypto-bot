@@ -115,7 +115,7 @@ Tuliskan analisis dalam format Markdown yang rapi, padat, profesional, dan mudah
         for percobaan in range(3):
             try:
                 res = client.models.generate_content(
-                    model='gemini-2.5-flash',
+                    model='gemini-3.8-flash',
                     contents=prompt,
                 )
                 break
@@ -139,4 +139,3 @@ Tuliskan analisis dalam format Markdown yang rapi, padat, profesional, dan mudah
 
 if __name__ == "__main__":
     jalankan_screening()
-
